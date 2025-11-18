@@ -364,7 +364,121 @@ const appointments = {
       res.status(500).json({ error: "Server error", detail: e.message });
     }
   },
+
+    // POST /api/appointments/:id/cancel
+  cancel: async (req, res) => {
+    try {
+      const id = Number(req.params.id || 0);
+      if (!id) {
+        return res.status(400).json({ error: "Appointment id required" });
+      }
+
+      const appt = await m.appointments.findById(id);
+      if (!appt) {
+        return res.status(404).json({ error: "Appointment not found" });
+      }
+
+      // Only the patient who owns it (or admin) can cancel
+      const userId = req.user?.id;
+      const role   = req.user?.role;
+
+      if (role !== "admin" && Number(appt.patientId) !== Number(userId)) {
+        return res.status(403).json({ error: "You cannot cancel this appointment" });
+      }
+
+      if (appt.status && appt.status.toLowerCase() === "cancelled") {
+        // idempotent behavior
+        return res.json({ ok: true, message: "Already cancelled", appointment: appt });
+      }
+
+      await m.appointments.updateStatus(id, "cancelled");
+      const updated = await m.appointments.findById(id);
+
+      return res.json({
+        ok: true,
+        message: "Appointment cancelled",
+        appointment: updated,
+      });
+    } catch (e) {
+      console.error("cancel error", e);
+      res.status(500).json({ error: "Server error", detail: e.message });
+    }
+  },
+
+  // POST /api/appointments/:id/reschedule
+  // body: { date: "YYYY-MM-DD", time: "HH:MM" }
+  reschedule: async (req, res) => {
+    try {
+      const id = Number(req.params.id || 0);
+      if (!id) {
+        return res.status(400).json({ error: "Appointment id required" });
+      }
+
+      const existing = await m.appointments.findById(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Appointment not found" });
+      }
+
+      // Only owning patient (or admin) can reschedule
+      const userId = req.user?.id;
+      const role   = req.user?.role;
+
+      if (role !== "admin" && Number(existing.patientId) !== Number(userId)) {
+        return res.status(403).json({ error: "You cannot reschedule this appointment" });
+      }
+
+      const { date, time } = req.body || {};
+      const dateISO  = String(date || "");
+      const timeHHMM = String(time || "");
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO) || !/^\d{2}:\d{2}$/.test(timeHHMM)) {
+        return res.status(400).json({ error: "date(YYYY-MM-DD) and time(HH:MM) required" });
+      }
+
+      // Past / lunch / conflict checks (reuse same rules as booking)
+      const today = dayjs().format("YYYY-MM-DD");
+      const now   = dayjs().format("HH:mm");
+
+      if (dateISO < today || (dateISO === today && timeHHMM <= now)) {
+        return res.status(400).json({ error: "Cannot reschedule to a past time" });
+      }
+
+      if (["12:30", "13:00"].includes(timeHHMM)) {
+        return res.status(409).json({ error: "That time is not available (lunch)" });
+      }
+
+      // Check conflict for same doctor at new slot
+      const conflict = await m.appointments.findConflict(
+        existing.doctorId,
+        dateISO,
+        timeHHMM
+      );
+      // conflict.id === existing.id is ok (same record)
+      if (conflict && Number(conflict.id) !== Number(id)) {
+        return res.status(409).json({ error: "That time is already booked" });
+      }
+
+      await m.appointments.updateDateTime(id, {
+        date: dateISO,
+        time: timeHHMM,
+        status: "booked",
+      });
+
+      const updated = await m.appointments.findById(id);
+      return res.json({
+        ok: true,
+        message: "Appointment rescheduled",
+        appointment: updated,
+      });
+    } catch (e) {
+      console.error("reschedule error", e);
+      res.status(500).json({ error: "Server error", detail: e.message });
+    }
+  },
+
+
 };
+
 
 /* ============== EXPORT ============== */
 module.exports = { auth, users, doctors, appointments };

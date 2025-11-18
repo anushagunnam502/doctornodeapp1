@@ -28,6 +28,9 @@ router.get("/api/doctors/:doctorId", ctrl.auth.requireAuth, ctrl.doctors.detail)
 router.get ("/api/slots",             ctrl.auth.requireAuth, ctrl.appointments.slotsForDay);
 router.post("/api/appointments/book", ctrl.auth.requireAuth, ctrl.appointments.book);
 router.get ("/api/appointments/mine", ctrl.auth.requireAuth, ctrl.appointments.listMine);
+/* manage existing appointments */
+router.post("/api/appointments/:id/cancel", ctrl.auth.requireAuth, ctrl.appointments.cancel);
+router.post("/api/appointments/:id/reschedule",ctrl.auth.requireAuth, ctrl.appointments.reschedule);
 
 console.log("routes loaded (appointments + slots)");
 

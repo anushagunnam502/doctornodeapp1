@@ -210,4 +210,29 @@ exports.appointments = {
     );
     return rows[0];
   },
+
+  // Update status (e.g., cancel)
+  async updateStatus(id, status) {
+    const pool = await poolPromise;
+    await pool.execute(
+      "UPDATE appointments SET status = ? WHERE id = ?",
+      [status, id]
+    );
+  },
+
+  // Update date/time (and optionally status) for reschedule
+  async updateDateTime(id, { date, time, status }) {
+    const pool = await poolPromise;
+    if (status) {
+      await pool.execute(
+        "UPDATE appointments SET date = ?, time = ?, status = ? WHERE id = ?",
+        [date, time, status, id]
+      );
+    } else {
+      await pool.execute(
+        "UPDATE appointments SET date = ?, time = ? WHERE id = ?",
+        [date, time, id]
+      );
+    }
+  },
 };
