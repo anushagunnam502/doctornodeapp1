@@ -1,4 +1,5 @@
 ﻿import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
@@ -47,7 +48,18 @@ export default function Doctors(){
         <div style={{display:"grid", gap:16, marginTop:20}}>
           {rows.map(d => (
             <div key={d.id} className="card" style={{boxShadow:"none", borderColor:"#e2e8f0"}}>
-              <h2 style={{marginBottom:6}}>{d.name}</h2>
+              {/* title row with Book button on the right */}
+              <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:12}}>
+                <h2 style={{marginBottom:6}}>{d.name}</h2>
+                <Link
+                  className="btn"
+                  to={`/book?doctorId=${encodeURIComponent(d.id)}`}
+                  title={`Book ${d.name}`}
+                >
+                  Book
+                </Link>
+              </div>
+
               <div className="helper">Specialty: <b>{d.specialty || "—"}</b></div>
               <div className="helper">City: <b>{d.city || "—"}</b> · Fee: <b>{d.fee != null ? ("$"+d.fee) : "—"}</b></div>
               <div className="helper">Email: <b>{d.email}</b> {d.phone ? <> · Phone: <b>{d.phone}</b></> : null}</div>
