@@ -1,13 +1,14 @@
 ﻿// controllers.js
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const dayjs = require("dayjs");
 const m = require("./models");
 
 /* ============== config ============== */
 const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
 const TOKEN_EXP = "7d";
-const VERIFY_EXP_MIN = 15;     // code valid for 15 minutes
-const RESEND_COOLDOWN_SEC = 60; // basic rate-limit per email (memory only, dev)
+const VERIFY_EXP_MIN = 15;      // code valid for 15 minutes
+const RESEND_COOLDOWN_SEC = 60; // basic rate-limit for resend
 
 /* ============== helpers ============== */
 function sign(user) {
@@ -29,13 +30,15 @@ async function requireAuth(req, res, next) {
 
 function requireRole(role) {
   return (req, res, next) => {
-    if (!req.user || req.user.role !== role) return res.status(403).json({ error: "Forbidden" });
+    if (!req.user || req.user.role !== role) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     next();
   };
 }
 
 function genCode6() {
-  return String(Math.floor(100000 + Math.random() * 900000)); // 6-digit
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 function minutesFromNow(min) {
@@ -45,7 +48,7 @@ function minutesFromNow(min) {
 }
 
 /* naive dev-only rate limit for resend */
-const resendMap = new Map(); // email -> lastEpochSec
+const resendMap = new Map();
 function canResend(email) {
   const now = Math.floor(Date.now() / 1000);
   const last = resendMap.get(email) || 0;
@@ -71,19 +74,22 @@ const auth = {
 
       const hash = await bcrypt.hash(password, 10);
       const id = await m.users.create({ name, email, passwordHash: hash, role });
-      const user = await m.users.findById(id); // email_verified defaults to 0
+      const user = await m.users.findById(id);
 
-      // create verification code
       const code = genCode6();
       const expiresAt = minutesFromNow(VERIFY_EXP_MIN);
       await m.emailVerifications.createCode(user.id, code, expiresAt);
-
-      // DEV: log the code to server console instead of sending email
       console.log(`[verify] code for ${email}: ${code} (expires ${expiresAt.toISOString()})`);
 
       return res.status(201).json({
-        message: "Registered. Please verify your email with the 6-digit code.",
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, email_verified: user.email_verified }
+        message: "Registered. Please verify your email.",
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          email_verified: user.email_verified,
+        },
       });
     } catch (e) {
       res.status(500).json({ error: "Server error", detail: e.message });
@@ -97,8 +103,8 @@ const auth = {
 
       const user = await m.users.findByEmail(email);
       if (!user) return res.status(404).json({ error: "User not found" });
+
       if (user.email_verified) {
-        // already verified
         await m.emailVerifications.deleteForUser(user.id);
         return res.json({ ok: true, message: "Email already verified." });
       }
@@ -108,7 +114,7 @@ const auth = {
 
       await m.users.markVerified(user.id);
       await m.emailVerifications.deleteForUser(user.id);
-      return res.json({ ok: true, message: "Email verified. You can now log in." });
+      res.json({ ok: true, message: "Email verified. You can now log in." });
     } catch (e) {
       res.status(500).json({ error: "Server error", detail: e.message });
     }
@@ -125,16 +131,17 @@ const auth = {
 
       const user = await m.users.findByEmail(email);
       if (!user) return res.status(404).json({ error: "User not found" });
-      if (user.email_verified) return res.status(200).json({ ok: true, message: "Email already verified." });
+
+      if (user.email_verified) {
+        return res.json({ ok: true, message: "Email already verified." });
+      }
 
       const code = genCode6();
       const expiresAt = minutesFromNow(VERIFY_EXP_MIN);
       await m.emailVerifications.createCode(user.id, code, expiresAt);
-
-      // DEV: log the code instead of sending an email
       console.log(`[verify:resend] code for ${email}: ${code} (expires ${expiresAt.toISOString()})`);
 
-      return res.json({ ok: true, message: "Verification code re-sent (check server console in dev)." });
+      res.json({ ok: true, message: "Verification code re-sent." });
     } catch (e) {
       res.status(500).json({ error: "Server error", detail: e.message });
     }
@@ -156,12 +163,18 @@ const auth = {
       const token = sign(user);
       res.json({
         token,
-        user: { id: user.id, name: user.name, email: user.email, role: user.role, email_verified: user.email_verified }
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          email_verified: user.email_verified,
+        },
       });
     } catch (e) {
       res.status(500).json({ error: "Server error", detail: e.message });
     }
-  }
+  },
 };
 
 /* ============== USERS ============== */
@@ -178,7 +191,7 @@ const users = {
         email_verified: user.email_verified,
         phone: user.phone,
         gender: user.gender,
-        dob: user.dob
+        dob: user.dob,
       });
     } catch (e) {
       res.status(500).json({ error: "Server error", detail: e.message });
@@ -198,12 +211,12 @@ const users = {
         email_verified: user.email_verified,
         phone: user.phone,
         gender: user.gender,
-        dob: user.dob
+        dob: user.dob,
       });
     } catch (e) {
       res.status(500).json({ error: "Server error", detail: e.message });
     }
-  }
+  },
 };
 
 /* ============== DOCTORS ============== */
@@ -240,7 +253,118 @@ const doctors = {
     } catch (e) {
       res.status(500).json({ error: "Server error", detail: e.message });
     }
-  }
+  },
 };
 
-module.exports = { auth, users, doctors };
+/* ============== APPOINTMENTS ============== */
+
+// helper: generate 30-min slots between start..end ("HH:mm")
+function generateSlots({ start = "09:00", end = "17:00", stepMin = 30 }) {
+  const [sh, sm] = start.split(":").map(Number);
+  const [eh, em] = end.split(":").map(Number);
+  const startMin = sh * 60 + sm;
+  const endMin = eh * 60 + em;
+  const out = [];
+  for (let m = startMin; m <= endMin - stepMin; m += stepMin) {
+    const hh = String(Math.floor(m / 60)).padStart(2, "0");
+    const mm = String(m % 60).padStart(2, "0");
+    out.push(`${hh}:${mm}`);
+  }
+  return out;
+}
+
+const appointments = {
+  // GET /api/slots?doctorId=1&date=YYYY-MM-DD
+  slotsForDay: async (req, res) => {
+    try {
+      const doctorId = Number(req.query.doctorId);
+      const dateISO  = String(req.query.date || "");
+      if (!doctorId || !/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) {
+        return res.status(400).json({ error: "doctorId and date=YYYY-MM-DD are required" });
+      }
+
+      const base = generateSlots({ start: "09:00", end: "17:00", stepMin: 30 });
+      const lunch = new Set(["12:30", "13:00"]);
+
+      const bookedRows = await m.appointments.listByDoctorAndDate(doctorId, dateISO);
+      const booked = new Set(bookedRows.map(r => r.time));
+
+      const today = dayjs().format("YYYY-MM-DD");
+      const now   = dayjs().format("HH:mm");
+
+      const list = base.map(t => {
+        const isPast   = dateISO === today && t <= now;
+        const isLunch  = lunch.has(t);
+        const isBooked = booked.has(t);
+        const available = !(isPast || isLunch || isBooked);
+        const h = Number(t.split(":")[0]);
+        const period = h < 12 ? "Morning" : h < 17 ? "Afternoon" : "Evening";
+        const reason = isPast ? "Past time" : isLunch ? "Lunch" : isBooked ? "Booked" : "";
+        return { time: t, available, reason, period };
+      });
+
+      res.json(list);
+    } catch (e) {
+      res.status(500).json({ error: "Server error", detail: e.message });
+    }
+  },
+
+  // POST /api/appointments/book
+  book: async (req, res) => {
+    try {
+      const { doctorId, patientId, date, time } = req.body || {};
+      const dId      = Number(doctorId);
+      const pId      = Number(patientId || req.user?.id);
+      const dateISO  = String(date || "");
+      const timeHHMM = String(time || "");
+
+      if (!dId || !pId || !/^\d{4}-\d{2}-\d{2}$/.test(dateISO) || !/^\d{2}:\d{2}$/.test(timeHHMM)) {
+        return res.status(400).json({ error: "doctorId, date(YYYY-MM-DD), time(HH:MM) required" });
+      }
+
+      const doctor = await m.doctors.findById(dId);
+      if (!doctor) return res.status(404).json({ error: "Doctor not found" });
+
+      const today = dayjs().format("YYYY-MM-DD");
+      const now   = dayjs().format("HH:mm");
+      if (dateISO < today || (dateISO === today && timeHHMM <= now)) {
+        return res.status(400).json({ error: "Cannot book a past time" });
+      }
+
+      if (["12:30", "13:00"].includes(timeHHMM)) {
+        return res.status(409).json({ error: "That time is not available (lunch)" });
+      }
+
+      const conflict = await m.appointments.findConflict(dId, dateISO, timeHHMM);
+      if (conflict) {
+        return res.status(409).json({ error: "That time is already booked" });
+      }
+
+      const id = await m.appointments.create({
+        doctorId: dId,
+        patientId: pId,
+        date: dateISO,
+        time: timeHHMM,
+        status: "booked",
+      });
+
+      const saved = await m.appointments.findById(id);
+      res.status(201).json(saved);
+    } catch (e) {
+      res.status(500).json({ error: "Server error", detail: e.message });
+    }
+  },
+
+  // GET /api/appointments/mine
+  listMine: async (req, res) => {
+    try {
+      const rows = await m.appointments.listByPatient(req.user.id);
+      res.json(rows);
+    } catch (e) {
+      res.status(500).json({ error: "Server error", detail: e.message });
+    }
+  },
+};
+
+/* ============== EXPORT ============== */
+module.exports = { auth, users, doctors, appointments };
