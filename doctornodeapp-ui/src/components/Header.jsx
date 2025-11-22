@@ -1,4 +1,4 @@
-﻿import { NavLink, Link } from "react-router-dom";
+﻿import { NavLink, Link } from "react-router-dom"; 
 import { useAuth } from "../context/AuthContext";
 
 export default function Header(){
@@ -12,14 +12,21 @@ export default function Header(){
         </Link>
         <nav className="nav">
           {isAuthed ? (
-  <>
-    <span style={{marginRight:10, color:"#334155"}}>Hi, <b>{user?.name}</b></span>
-    <NavLink to="/doctors">Doctors</NavLink>
-    <NavLink to="/appointments">My Appointments</NavLink>
-              {/* Book link removed */}
-              <button className="btn" onClick={logout}>Logout</button>
-  </>
-) : (
+            <>
+              <span style={{marginRight:10, color:"#334155"}}>
+                Hi, <b>{user?.name}</b>
+              </span>
+              <NavLink to="/doctors">Doctors</NavLink>
+              <NavLink to="/appointments">My Appointments</NavLink>
+              {/* Only for doctors */}
+              {user?.role === "doctor" && (
+                <NavLink to="/doctor-appointments">Doctor Dashboard</NavLink>
+              )}
+              <button className="btn" style={{marginLeft:14}} onClick={logout}>
+                Logout
+              </button>
+            </>
+          ) : (
             <>
               <NavLink to="/login">Login</NavLink>
               <NavLink to="/register">Register</NavLink>

@@ -1,5 +1,4 @@
-﻿// controllers.js
-const jwt = require("jsonwebtoken");
+﻿const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const dayjs = require("dayjs");
 const m = require("./models");
@@ -55,6 +54,15 @@ function canResend(email) {
   if (now - last < RESEND_COOLDOWN_SEC) return false;
   resendMap.set(email, now);
   return true;
+}
+
+// map a logged-in user to their doctor profile via email
+async function mapUserToDoctor(userId) {
+  if (!userId) return null;
+  const user = await m.users.findById(userId);
+  if (!user || !user.email) return null;
+  const doctor = await m.doctors.findByEmail(user.email);
+  return doctor || null;
 }
 
 /* ============== AUTH ============== */
@@ -361,6 +369,164 @@ const appointments = {
       const rows = await m.appointments.listByPatient(req.user.id);
       res.json(rows);
     } catch (e) {
+      res.status(500).json({ error: "Server error", detail: e.message });
+    }
+  },
+
+  // POST /api/appointments/:id/cancel
+  cancel: async (req, res) => {
+    try {
+      const id = Number(req.params.id || 0);
+      if (!id) return res.status(400).json({ error: "Appointment id required" });
+
+      const appt = await m.appointments.findById(id);
+      if (!appt) return res.status(404).json({ error: "Appointment not found" });
+
+      const userId = req.user?.id;
+      const role   = req.user?.role;
+
+      if (role !== "admin" && Number(appt.patientId) !== Number(userId)) {
+        return res.status(403).json({ error: "You cannot cancel this appointment" });
+      }
+
+      const today = dayjs().format("YYYY-MM-DD");
+      const now   = dayjs().format("HH:mm");
+      if (appt.date < today || (appt.date === today && appt.time <= now)) {
+        return res.status(400).json({ error: "Cannot cancel a past appointment" });
+      }
+
+      if (appt.status && appt.status.toLowerCase().startsWith("cancel")) {
+        return res.json({ ok: true, message: "Already cancelled", appointment: appt });
+      }
+
+      await m.appointments.updateStatus(id, "cancelled");
+      const updated = await m.appointments.findById(id);
+
+      res.json({ ok: true, message: "Appointment cancelled", appointment: updated });
+    } catch (e) {
+      res.status(500).json({ error: "Server error", detail: e.message });
+    }
+  },
+
+  // POST /api/appointments/:id/reschedule
+  // body: { date: "YYYY-MM-DD", time: "HH:MM" }
+  reschedule: async (req, res) => {
+    try {
+      const id = Number(req.params.id || 0);
+      if (!id) return res.status(400).json({ error: "Appointment id required" });
+
+      const appt = await m.appointments.findById(id);
+      if (!appt) return res.status(404).json({ error: "Appointment not found" });
+
+      const userId = req.user?.id;
+      const role   = req.user?.role;
+
+      if (role !== "admin" && Number(appt.patientId) !== Number(userId)) {
+        return res.status(403).json({ error: "You cannot reschedule this appointment" });
+      }
+
+      const { date, time } = req.body || {};
+      const dateISO  = String(date || "");
+      const timeHHMM = String(time || "");
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO) || !/^\d{2}:\d{2}$/.test(timeHHMM)) {
+        return res.status(400).json({ error: "date(YYYY-MM-DD) and time(HH:MM) are required" });
+      }
+
+      const today = dayjs().format("YYYY-MM-DD");
+      const now   = dayjs().format("HH:mm");
+      if (dateISO < today || (dateISO === today && timeHHMM <= now)) {
+        return res.status(400).json({ error: "Cannot reschedule to a past time" });
+      }
+
+      if (["12:30", "13:00"].includes(timeHHMM)) {
+        return res.status(409).json({ error: "That time is not available (lunch)" });
+      }
+
+      const conflict = await m.appointments.findConflict(appt.doctorId, dateISO, timeHHMM);
+      if (conflict && conflict.id !== appt.id) {
+        return res.status(409).json({ error: "That time is already booked" });
+      }
+
+      await m.appointments.updateDateTime(id, { date: dateISO, time: timeHHMM, status: "booked" });
+      const updated = await m.appointments.findById(id);
+
+      res.json({ ok: true, message: "Appointment rescheduled", appointment: updated });
+    } catch (e) {
+      res.status(500).json({ error: "Server error", detail: e.message });
+    }
+  },
+
+  // GET /api/appointments/doctor
+  // for doctor users: list their own appointments
+  listForDoctor: async (req, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const doctor = await mapUserToDoctor(userId);
+      if (!doctor) {
+        return res
+          .status(404)
+          .json({ error: "No doctor profile linked to this account" });
+      }
+
+      const rows = await m.appointments.listByDoctor(doctor.id);
+      return res.json(rows);
+    } catch (e) {
+      console.error("listForDoctor error", e);
+      res.status(500).json({ error: "Server error", detail: e.message });
+    }
+  },
+
+  // POST /api/appointments/:id/status
+  // body: { status: "confirmed" | "completed" | "cancelled" }
+  updateStatus: async (req, res) => {
+    try {
+      const id = Number(req.params.id || 0);
+      if (!id) {
+        return res.status(400).json({ error: "Appointment id required" });
+      }
+
+      const rawStatus = (req.body?.status || "").toString().toLowerCase();
+      const allowed = {
+        booked: "booked",
+        confirmed: "confirmed",
+        completed: "completed",
+        cancelled: "cancelled",
+        canceled: "cancelled",
+      };
+      const newStatus = allowed[rawStatus];
+
+      if (!newStatus) {
+        return res.status(400).json({
+          error: "Invalid status. Use booked, confirmed, completed, or cancelled.",
+        });
+      }
+
+      const existing = await m.appointments.findById(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Appointment not found" });
+      }
+
+      const userId = req.user?.id;
+      const doctor = await mapUserToDoctor(userId);
+      if (!doctor || Number(existing.doctorId) !== Number(doctor.id)) {
+        return res.status(403).json({ error: "You cannot update this appointment" });
+      }
+
+      await m.appointments.updateStatus(id, newStatus);
+      const updated = await m.appointments.findById(id);
+
+      return res.json({
+        ok: true,
+        message: `Status updated to ${newStatus}`,
+        appointment: updated,
+      });
+    } catch (e) {
+      console.error("updateStatus error", e);
       res.status(500).json({ error: "Server error", detail: e.message });
     }
   },

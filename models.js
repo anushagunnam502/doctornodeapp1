@@ -1,5 +1,4 @@
-﻿// models.js
-const mysql = require("mysql2/promise");
+﻿const mysql = require("mysql2/promise");
 
 async function getPool() {
   return mysql.createPool({
@@ -125,6 +124,19 @@ exports.doctors = {
     const [rows] = await pool.execute(sql, [id]);
     return rows[0];
   },
+
+  async findByEmail(email) {
+    const pool = await poolPromise;
+    const sql =
+      "SELECT d.id, d.name, d.email, d.phone, d.city, d.fee," +
+      "       s.id AS specialtyId, s.name AS specialty " +
+      "FROM doctors d " +
+      "LEFT JOIN specialties s ON s.id = d.specialty_id " +
+      "WHERE d.email = ? " +
+      "LIMIT 1";
+    const [rows] = await pool.execute(sql, [email]);
+    return rows[0];
+  },
 };
 
 /* ===================== APPOINTMENTS ===================== */
@@ -209,5 +221,45 @@ exports.appointments = {
       [doctorId, dateISO, time]
     );
     return rows[0];
+  },
+
+  // Update status (for cancel, doctor status changes, etc.)
+  async updateStatus(id, status) {
+    const pool = await poolPromise;
+    await pool.execute(
+      "UPDATE appointments SET status = ? WHERE id = ?",
+      [status, id]
+    );
+  },
+
+  // Update date/time (for reschedule)
+  async updateDateTime(id, { date, time, status }) {
+    const pool = await poolPromise;
+    await pool.execute(
+      "UPDATE appointments SET date = ?, time = ?, status = COALESCE(?, status) WHERE id = ?",
+      [date, time, status || null, id]
+    );
+  },
+
+  // All appointments for a doctor (for doctor dashboard)
+  async listByDoctor(doctorId) {
+    const pool = await poolPromise;
+    const [rows] = await pool.execute(
+      `SELECT a.id,
+              a.doctor_id  AS doctorId,
+              a.patient_id AS patientId,
+              DATE_FORMAT(a.date,'%Y-%m-%d') AS date,
+              a.time,
+              a.status,
+              u.name  AS patientName,
+              u.email AS patientEmail,
+              u.phone AS patientPhone
+         FROM appointments a
+         LEFT JOIN users u ON u.id = a.patient_id
+        WHERE a.doctor_id = ?
+        ORDER BY a.date ASC, a.time ASC`,
+      [doctorId]
+    );
+    return rows;
   },
 };

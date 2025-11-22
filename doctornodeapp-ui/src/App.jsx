@@ -7,6 +7,8 @@ import VerifyEmail from "./pages/VerifyEmail.jsx";
 import Doctors from "./pages/Doctors.jsx";
 import Appointments from "./pages/Appointments.jsx"; // << Book page
 import MyAppointments from "./pages/MyAppointments.jsx";
+import DoctorAppointments from "./pages/DoctorAppointments.jsx";
+
 
 function Home() {
     return (
@@ -31,6 +33,7 @@ export default function App() {
         <Route path="/doctors" element={<Doctors />} />
         <Route path="/book" element={<Appointments />} />   {/* <- NEW */}
         <Route path="/appointments" element={<MyAppointments />} />
+         <Route path="/doctor-appointments" element={<DoctorAppointments />} />
         <Route path="*" element={<Home />} />
 
       </Routes>
